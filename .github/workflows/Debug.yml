@@ -1,8 +1,10 @@
+# Haybarn: push trigger removed — this standalone test workflow doesn't gate any
+# production artifact; the core engine's haybarn-extensions.yml is the canonical builder.
 name: Debug Mode Tests
 on:
+  pull_request:
+  repository_dispatch:
   workflow_dispatch:
-  schedule:
-    - cron: '0 2 * * *'
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' || github.sha }}
   cancel-in-progress: true
