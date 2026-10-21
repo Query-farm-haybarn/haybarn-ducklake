@@ -1,10 +1,10 @@
 name: Format Check
+# Haybarn: push/schedule triggers removed — this standalone test workflow doesn't gate any
+# production artifact; the core engine's haybarn-extensions.yml is the canonical builder.
 on:
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches:
-      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' || github.sha }}

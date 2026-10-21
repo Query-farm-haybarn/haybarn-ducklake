@@ -1,9 +1,16 @@
 #
-# This workflow calls the main distribution pipeline from DuckDB to build, test and (optionally) release the extension
+# Haybarn build-fork: calls the HAYBARN-FORK distribution pipeline
+# (Query-farm-haybarn/haybarn-extension-ci-tools, haybarn-2.0 branch) so the build
+# runs in haybarn-ci images with Haybarn's R2-backed ccache, links the Haybarn
+# engine (override_duckdb_repository), and deploys with the Haybarn signing key.
+# duckdb_version is the Haybarn engine release tag. (.github/duckdb-version stays
+# an upstream ref: the standalone test workflows check out the upstream duckdb
+# submodule at it.) The engine's haybarn-extensions.yml is the canonical builder,
+# so push is disabled here.
 #
 name: Main Extension Distribution Pipeline
 on:
-  push:
+  # push:  # Haybarn: disabled — built via core engine haybarn-extensions.yml SHA pin
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
@@ -13,31 +20,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-duckdb-version:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    name: Get DuckDB version
-    runs-on: ubuntu-latest
-    outputs:
-      duckdb_version: ${{ steps.version.outputs.duckdb_version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: .github
-      - id: version
-        run: echo "duckdb_version=$(cat .github/duckdb-version)" >> $GITHUB_OUTPUT
-
   duckdb-next-build:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: Build extension binaries
-    needs: get-duckdb-version
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5-variegata
+    uses: Query-farm-haybarn/haybarn-extension-ci-tools/.github/workflows/_extension_distribution.yml@5fde928546a7c1c4c3fe9f7756b185ae87f27a7f
+    secrets:
+      vcpkg_token: ${{ secrets.HAYBARN_VCPKG_TOKEN }}
     with:
-      duckdb_version: ${{ needs.get-duckdb-version.outputs.duckdb_version }}
-      ci_tools_version: v1.5-variegata
-      # Temporary override; remove when extension-ci-tools updates its default.
-      vcpkg_commit: cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3 # Release 2026.06.24
+      duckdb_version: haybarn-v2.0.0-rc1
+      ci_tools_version: 5fde928546a7c1c4c3fe9f7756b185ae87f27a7f
       extension_name: ducklake
       opt_in_archs: 'linux_arm64_musl;linux_amd64_musl'
+      override_duckdb_repository: 'https://github.com/Query-farm-haybarn/haybarn'
+      override_ci_tools_repository: 'Query-farm-haybarn/haybarn-extension-ci-tools'
 
   # Regression test, see https://github.com/duckdb/ducklake/pull/1256 for more details.
   gcc12-compatibility-build:
@@ -46,6 +41,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       VCPKG_TARGET_TRIPLET: x64-linux
+      X_VCPKG_ASSET_SOURCES: 'clear;x-azurl,https://haybarn-vcpkg-cache.rusty-bb6.workers.dev/assets/,,read'
       GEN: Ninja
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       CC: gcc-12
@@ -71,7 +67,7 @@ jobs:
         uses: hendrikmuhs/ccache-action@main
         with:
           key: gcc12-compatibility-build
-          save: ${{ github.ref == 'refs/heads/main' || github.repository != 'duckdb/ducklake' }}
+          save: ${{ github.ref == 'refs/heads/main' || github.repository != 'Query-farm-haybarn/haybarn-ducklake' }}
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11.1
@@ -83,21 +79,23 @@ jobs:
           make release
 
   duckdb-next-deploy:
-    if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.ref != 'refs/heads/main')
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: Deploy extension binaries
-    needs: [get-duckdb-version, duckdb-next-build, gcc12-compatibility-build]
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_deploy.yml@main
+    needs: [duckdb-next-build, gcc12-compatibility-build]
+    uses: Query-farm-haybarn/haybarn-extension-ci-tools/.github/workflows/_extension_deploy.yml@5fde928546a7c1c4c3fe9f7756b185ae87f27a7f
     secrets: inherit
     with:
       extension_name: ducklake
-      ci_tools_version: main
-      deploy_latest: ${{ startsWith(github.ref, 'refs/heads/v') }}
-      deploy_versioned: ${{ startsWith(github.ref, 'refs/heads/v') }}
-
+      duckdb_version: haybarn-v2.0.0-rc1
+      ci_tools_version: 5fde928546a7c1c4c3fe9f7756b185ae87f27a7f
+      override_ci_tools_repository: 'Query-farm-haybarn/haybarn-extension-ci-tools'
+      opt_in_archs: 'linux_arm64_musl;linux_amd64_musl'
+      deploy_latest: ${{ github.ref == 'refs/heads/haybarn-2.0' }}
+      deploy_versioned: ${{ github.ref == 'refs/heads/haybarn-2.0' }}
   relassert:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: Build relassert
-    runs-on: ${{ github.repository_owner == 'duckdb' && 'namespace-profile-linux-x64' || 'ubuntu-latest' }}
+    runs-on: ${{ 'ubuntu-latest' }}
     env:
       GEN: ninja
       CC: clang-20
@@ -131,7 +129,7 @@ jobs:
           max-size: 5GB
           evict-old-files: job
       - name: Build (relassert → ASan + UBSan + LSan)
-        uses: duckdb/duckdb-ci/build-duckdb@main
+        uses: Query-farm-haybarn/haybarn-ci/build-duckdb@e0ad82dd40f1218f92e99adade6810c4c97b3279 # haybarn
         with:
           build-type: relassert
           build: python3 duckdb/scripts/ci/retry.py -- make relassert

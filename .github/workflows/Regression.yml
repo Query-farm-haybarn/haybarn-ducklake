@@ -1,10 +1,9 @@
 name: Regression
+# Haybarn: push/schedule triggers removed — this standalone test workflow doesn't gate any
+# production artifact; the core engine's haybarn-extensions.yml is the canonical builder.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 concurrency:
@@ -17,6 +16,9 @@ permissions:
 defaults:
   run:
     shell: bash
+
+env:
+  X_VCPKG_ASSET_SOURCES: 'clear;x-azurl,https://haybarn-vcpkg-cache.rusty-bb6.workers.dev/assets/,,read'
 
 jobs:
   regression:
